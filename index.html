@@ -463,7 +463,7 @@ document.getElementById('btnUploadExcel').addEventListener('click', () => {
         
         const qty = parseInt(row['Jumlah']) || 1;
         
-        // Penyesuaian format harga jika terbaca desimal akibat pemisah ribuan
+        // Harga Setelah Diskon
         let rawHarga = row['Harga Setelah Diskon'] || 0;
         let harga = 0;
         if (typeof rawHarga === 'number') {
@@ -476,6 +476,43 @@ document.getElementById('btnUploadExcel').addEventListener('click', () => {
           }
         } else {
           harga = parseInt(String(rawHarga).replace(/[^0-9]/g, '')) || 0;
+        }
+
+        // Subtotal Pesanan
+        let rawSubtotal = row['Subtotal Pesanan'] || 0;
+        let subtotal = 0;
+        if (typeof rawSubtotal === 'number') {
+          if (rawSubtotal < 100000 && !Number.isInteger(rawSubtotal)) {
+             subtotal = Math.round(rawSubtotal * 1000);
+          } else if (rawSubtotal < 10000) {
+             subtotal = rawSubtotal * 1000;
+          } else {
+             subtotal = rawSubtotal;
+          }
+        } else {
+          subtotal = parseInt(String(rawSubtotal).replace(/[^0-9]/g, '')) || 0;
+        }
+
+        // Total Pembayaran
+        let rawTotal = row['Total Pembayaran'] || 0;
+        let totalBayar = 0;
+        if (typeof rawTotal === 'number') {
+          if (rawTotal < 100000 && !Number.isInteger(rawTotal)) {
+             totalBayar = Math.round(rawTotal * 1000);
+          } else if (rawTotal < 10000) {
+             totalBayar = rawTotal * 1000;
+          } else {
+             totalBayar = rawTotal;
+          }
+        } else {
+          totalBayar = parseInt(String(rawTotal).replace(/[^0-9]/g, '')) || 0;
+        }
+        
+        // Kalkulasi Potongan Admin
+        let potonganAdmin = 0;
+        if (subtotal > 0 && totalBayar > 0) {
+           potonganAdmin = subtotal - totalBayar;
+           if (potonganAdmin < 0) potonganAdmin = 0;
         }
 
         const rawStatus = String(row['Status Pesanan'] || '').toLowerCase();
@@ -496,7 +533,7 @@ document.getElementById('btnUploadExcel').addEventListener('click', () => {
           qty: qty,
           harga: harga,
           status: status,
-          biaya_admin: 0,
+          biaya_admin: potonganAdmin,
           hpp_satuan: hpp_satuan
         });
       });
