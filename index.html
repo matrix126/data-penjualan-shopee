@@ -15,6 +15,9 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Library untuk membaca file Excel (.xlsx) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
 <style>
 :root{
   --bg:#f3f4f8; --surface:#ffffff; --surface2:#f8f9fc; --text:#1a1d29; --muted:#6b7280;
@@ -124,6 +127,23 @@ tr:nth-child(even){background:var(--surface2);}
         <div><label>Tanggal</label><input type="date" id="selDate"></div>
       </div>
       <div class="summary" id="summaryBox"></div>
+    </div>
+
+    <!-- Tambahan Card untuk Import Data Excel -->
+    <div class="card">
+      <h2>Import Transaksi (Excel Shopee)</h2>
+      <div class="grid" style="align-items:end;">
+        <div>
+          <label>Pilih File (.xlsx)</label>
+          <input type="file" id="fileExcel" accept=".xlsx, .xls, .csv">
+        </div>
+        <div>
+          <button class="btn" id="btnUploadExcel">Proses File Excel</button>
+        </div>
+      </div>
+      <div class="row-actions">
+        <span class="msg" id="excel_msg"></span>
+      </div>
     </div>
 
     <div class="card">
@@ -398,6 +418,116 @@ document.getElementById('btnSimpanT').addEventListener('click', async ()=>{
   document.getElementById('t_status').value='Selesai';
   document.getElementById('t_produk').focus();
   await loadDay(tanggal);
+});
+
+// === IMPORT EXCEL ===
+document.getElementById('btnUploadExcel').addEventListener('click', () => {
+  const fileInput = document.getElementById('fileExcel');
+  if (!fileInput.files.length) {
+    alert('Pilih file Excel terlebih dahulu!');
+    return;
+  }
+  const file = fileInput.files[0];
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      setStatus('Membaca file Excel...', 'msg');
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+      
+      if (!rows.length) {
+        alert('File Excel kosong atau tidak valid.');
+        setStatus('');
+        return;
+      }
+      
+      const transactions = [];
+      rows.forEach(row => {
+        const noPesanan = row['No. Pesanan'];
+        if (!noPesanan) return; // Skip baris kosong
+        
+        const waktuDibuat = row['Waktu Pesanan Dibuat'] || '';
+        const tanggal = String(waktuDibuat).split(' ')[0] || todayStr();
+        
+        const produk = row['Nama Produk'] || '';
+        const rawVariasi = row['Nama Variasi'] || '';
+        let variasi = rawVariasi;
+        let ukuran = '';
+        if (rawVariasi.includes(',')) {
+          const parts = rawVariasi.split(',');
+          ukuran = parts.pop().trim();
+          variasi = parts.join(',').trim();
+        }
+        
+        const qty = parseInt(row['Jumlah']) || 1;
+        
+        // Penyesuaian format harga jika terbaca desimal akibat pemisah ribuan
+        let rawHarga = row['Harga Setelah Diskon'] || 0;
+        let harga = 0;
+        if (typeof rawHarga === 'number') {
+          if (rawHarga < 100000 && !Number.isInteger(rawHarga)) {
+             harga = Math.round(rawHarga * 1000);
+          } else if (rawHarga < 10000) {
+             harga = rawHarga * 1000;
+          } else {
+             harga = rawHarga;
+          }
+        } else {
+          harga = parseInt(String(rawHarga).replace(/[^0-9]/g, '')) || 0;
+        }
+
+        const rawStatus = String(row['Status Pesanan'] || '').toLowerCase();
+        let status = 'Selesai';
+        if (rawStatus.includes('batal')) status = 'Dibatalkan';
+        else if (rawStatus.includes('retur') || rawStatus.includes('pengembalian')) status = 'Retur';
+        
+        // Cek hpp dari master
+        const m = masterMap[keyOf(produk, variasi, ukuran)];
+        const hpp_satuan = m ? (m.hpp || 0) : 0;
+        
+        transactions.push({
+          tanggal: tanggal,
+          no_pesanan: noPesanan,
+          produk: produk,
+          variasi: variasi,
+          ukuran: ukuran,
+          qty: qty,
+          harga: harga,
+          status: status,
+          biaya_admin: 0,
+          hpp_satuan: hpp_satuan
+        });
+      });
+      
+      if (transactions.length > 0) {
+        setStatus(`Menyimpan ${transactions.length} data ke database...`, 'msg');
+        
+        const { error } = await sb.from('transaksi').insert(transactions);
+        if (error) {
+          alert('Gagal simpan: ' + error.message);
+          setStatus('Gagal import.', 'err');
+        } else {
+          alert(`Berhasil import ${transactions.length} transaksi!`);
+          setStatus('Import selesai.', 'ok');
+          document.getElementById('fileExcel').value = '';
+          
+          // Muat ulang tabel harian berdasarkan tanggal order di row pertama
+          const tglLoad = transactions[0].tanggal;
+          document.getElementById('selDate').value = tglLoad;
+          await loadDay(tglLoad);
+        }
+      } else {
+        alert('Tidak ada data transaksi yang valid untuk diimport.');
+        setStatus('');
+      }
+    } catch (err) {
+      alert('Error saat memproses Excel: ' + err.message);
+      setStatus('Error import', 'err');
+    }
+  };
+  reader.readAsArrayBuffer(file);
 });
 
 // === BIAYA IKLAN ===
